@@ -37,6 +37,7 @@ INSTALLED_APPS = [
     'django.contrib.staticfiles',
     "rest_framework",
     "learning",
+    "django_filters",
 ]
 
 MIDDLEWARE = [
@@ -78,6 +79,12 @@ DATABASES = {
         'ENGINE': 'django.db.backends.sqlite3',
         'NAME': BASE_DIR / 'db.sqlite3',
     }
+}
+
+REST_FRAMEWORK = {
+    "DEFAULT_PAGINATION_CLASS": "learning.pagination.CoursePagination",
+    "PAGE_SIZE": 10,
+    "EXCEPTION_HANDLER": "learning.exceptions.rfc7807_exception_handler",
 }
 
 

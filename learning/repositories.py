@@ -1,48 +1,35 @@
-from .models import Category, Course, Enrollment
-
-
-class CategoryRepository:
-    @staticmethod
-    def get_all():
-        return Category.objects.all()
-
-    @staticmethod
-    def get_by_id(category_id):
-        return Category.objects.filter(id=category_id).first()
-
-    @staticmethod
-    def create(name):
-        return Category.objects.create(name=name)
+from django.db.models import Count
+from .models import Course, Enrollment
 
 
 class CourseRepository:
     @staticmethod
     def get_all():
-        return Course.objects.select_related("category").all()
+        return (
+            Course.objects.select_related("category")
+            .annotate(enrollment_count=Count("enrollments"))
+            .order_by("created_at", "id")
+        )
 
     @staticmethod
-    def get_by_id(course_id):
-        return Course.objects.select_related("category").filter(id=course_id).first()
-
-    @staticmethod
-    def create(title, category, description="", price=0.0):
-        return Course.objects.create(
-            title=title,
-            category=category,
-            description=description,
-            price=price,
+    def get_by_id(pk):
+        return (
+            Course.objects.select_related("category")
+            .prefetch_related("enrollments")
+            .filter(id=pk)
+            .first()
         )
 
 
 class EnrollmentRepository:
     @staticmethod
-    def get_by_course(course_id):
-        return Enrollment.objects.filter(course_id=course_id)
+    def get_for_course(course_id):
+        return Enrollment.objects.filter(course_id=course_id).order_by("-enrolled_at", "id")
 
     @staticmethod
     def create(course, student_name, student_email):
         return Enrollment.objects.create(
             course=course,
-            student_name=student_name,
-            student_email=student_email,
+            student_name=student_name.strip(),
+            student_email=student_email.strip(),
         )
