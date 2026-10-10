@@ -27,6 +27,17 @@ class EnrollmentRepository:
         return Enrollment.objects.filter(course_id=course_id).order_by("-enrolled_at", "id")
 
     @staticmethod
+    def exists(course_id, student_email):
+        return Enrollment.objects.filter(
+            course_id=course_id,
+            student_email=student_email,
+        ).exists()
+
+    @staticmethod
+    def count(course_id):
+        return Enrollment.objects.filter(course_id=course_id).count()
+
+    @staticmethod
     def create(course, student_name, student_email):
         return Enrollment.objects.create(
             course=course,

@@ -1,9 +1,11 @@
-from django.contrib import admin
 from django.urls import include, path
-from learning.views import health_check
+from rest_framework.routers import DefaultRouter
+from .views import CategoryViewSet, CourseViewSet
+
+router = DefaultRouter()
+router.register(r"categories", CategoryViewSet)
+router.register(r"courses", CourseViewSet, basename="course")
 
 urlpatterns = [
-    path("admin/", admin.site.urls),
-    path("health/", health_check, name="health-check"),
-    path("api/", include("learning.urls")),
+    path("", include(router.urls)),
 ]

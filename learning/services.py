@@ -1,4 +1,4 @@
-from rest_framework.exceptions import NotFound, ValidationError
+from .exceptions import ConflictException, NotFoundException, ValidationException
 from .repositories import CourseRepository, EnrollmentRepository
 
 
@@ -11,7 +11,7 @@ class CourseService:
     def get_course_or_404(pk):
         course = CourseRepository.get_by_id(pk)
         if not course:
-            raise NotFound("Курс не знайдено.")
+            raise NotFoundException(f"Course with id '{pk}' does not exist.")
         return course
 
 
@@ -24,6 +24,9 @@ class EnrollmentService:
     @staticmethod
     def register_student(course_id, student_name, student_email):
         course = CourseService.get_course_or_404(course_id)
-        if not student_name or not student_email:
-            raise ValidationError("Ім'я та email студента є обов'язковими.")
-        return EnrollmentRepository.create(course, student_name, student_email)
+        email = student_email.strip().lower()
+        if EnrollmentRepository.exists(course_id, email):
+            raise ConflictException("This attendee is already registered for the course.")
+        if EnrollmentRepository.count(course_id) >= 10:
+            raise ValidationException("The course is at full capacity.")
+        return EnrollmentRepository.create(course, student_name, email)

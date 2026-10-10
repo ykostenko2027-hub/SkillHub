@@ -37,6 +37,9 @@ class CourseViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         return CourseService.get_courses()
 
+    def get_object(self):
+        return CourseService.get_course_or_404(self.kwargs["pk"])
+
     def get_serializer_class(self):
         if self.action == "list":
             return CourseListSerializer
