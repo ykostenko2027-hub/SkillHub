@@ -89,3 +89,16 @@ class ErrorHandlingAndApiTests(TestCase):
         with self.assertNumQueries(2):
             response = self.client.get("/api/courses/")
             self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+    def test_swagger_ui_available(self):
+        response = self.client.get("/swagger/")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+    def test_openapi_schema_available(self):
+        response = self.client.get("/api/schema/")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+    def test_swagger_json_available(self):
+        response = self.client.get("/swagger/v1/swagger.json")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)

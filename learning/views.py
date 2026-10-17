@@ -1,5 +1,6 @@
 from django.db import connection, reset_queries
 from django_filters.rest_framework import DjangoFilterBackend
+from drf_spectacular.utils import extend_schema
 from rest_framework import filters, status, viewsets
 from rest_framework.decorators import action, api_view
 from rest_framework.response import Response
@@ -16,6 +17,7 @@ from .serializers import (
 from .services import CourseService, EnrollmentService
 
 
+@extend_schema(responses={200: None})
 @api_view(["GET"])
 def health_check(request):
     return Response({"status": "ok"})
@@ -45,6 +47,15 @@ class CourseViewSet(viewsets.ModelViewSet):
             return CourseListSerializer
         return CourseDetailSerializer
 
+    @extend_schema(
+        methods=["POST"],
+        request=CreateEnrollmentSerializer,
+        responses={201: EnrollmentSerializer, 400: None, 404: None, 409: None, 422: None},
+    )
+    @extend_schema(
+        methods=["GET"],
+        responses={200: EnrollmentSerializer(many=True), 404: None},
+    )
     @action(detail=True, methods=["get", "post"])
     def enrollments(self, request, pk=None):
         if request.method == "POST":
@@ -60,6 +71,7 @@ class CourseViewSet(viewsets.ModelViewSet):
         enrollments = EnrollmentService.get_course_enrollments(pk)
         return Response(EnrollmentSerializer(enrollments, many=True).data)
 
+    @extend_schema(responses={200: None})
     @action(detail=False, methods=["get"], url_path="n1-demo")
     def n1_demo(self, request):
         old_debug = connection.force_debug_cursor

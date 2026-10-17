@@ -38,6 +38,7 @@ INSTALLED_APPS = [
     "rest_framework",
     "learning",
     "django_filters",
+    "drf_spectacular",
 ]
 
 MIDDLEWARE = [
@@ -85,6 +86,14 @@ REST_FRAMEWORK = {
     "DEFAULT_PAGINATION_CLASS": "learning.pagination.CoursePagination",
     "PAGE_SIZE": 10,
     "EXCEPTION_HANDLER": "learning.exceptions.rfc7807_exception_handler",
+    "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
+}
+
+SPECTACULAR_SETTINGS = {
+    "TITLE": "SkillHub API",
+    "DESCRIPTION": "Платформа онлайн-навчання",
+    "VERSION": "v1",
+    "SERVE_INCLUDE_SCHEMA": False,
 }
 
 
