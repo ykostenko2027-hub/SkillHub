@@ -1,7 +1,11 @@
+import os
+from django.conf import settings
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase
 from rest_framework import status
 from rest_framework.test import APIClient
 from .models import Category, Course, Enrollment
+from .storage import LocalCoverImageStorage
 
 
 class ErrorHandlingAndApiTests(TestCase):
@@ -13,6 +17,16 @@ class ErrorHandlingAndApiTests(TestCase):
             category=self.category,
             price=100.0,
         )
+
+    def tearDown(self):
+        upload_dir = LocalCoverImageStorage.get_upload_dir()
+        if os.path.exists(upload_dir):
+            for file_name in os.listdir(upload_dir):
+                file_path = os.path.join(upload_dir, file_name)
+                try:
+                    os.remove(file_path)
+                except OSError:
+                    pass
 
     def test_health_check(self):
         response = self.client.get("/health/")
@@ -97,8 +111,95 @@ class ErrorHandlingAndApiTests(TestCase):
     def test_openapi_schema_available(self):
         response = self.client.get("/api/schema/")
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertEqual(response.status_code, status.HTTP_200_OK)
 
     def test_swagger_json_available(self):
         response = self.client.get("/swagger/v1/swagger.json")
         self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+    def test_upload_cover_success(self):
+        file_content = b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR"
+        image = SimpleUploadedFile("cover.png", file_content, content_type="image/png")
+        response = self.client.post(
+            f"/api/courses/{self.course.id}/cover/",
+            {"cover": image},
+            format="multipart",
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["cover_image_url"], f"/api/courses/{self.course.id}/cover/")
+        self.course.refresh_from_db()
+        self.assertIsNotNone(self.course.cover_image_path)
+        self.assertTrue(self.course.cover_image_path.endswith(".png"))
+        path = LocalCoverImageStorage.get_path(self.course.cover_image_path)
+        self.assertTrue(os.path.exists(path))
+
+    def test_get_cover_success(self):
+        file_content = b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR"
+        image = SimpleUploadedFile("cover.png", file_content, content_type="image/png")
+        self.client.post(
+            f"/api/courses/{self.course.id}/cover/",
+            {"cover": image},
+            format="multipart",
+        )
+        response = self.client.get(f"/api/courses/{self.course.id}/cover/")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response["Content-Type"], "image/png")
+        self.assertEqual(b"".join(response.streaming_content), file_content)
+
+    def test_upload_cover_invalid_type_returns_400(self):
+        text_file = SimpleUploadedFile("notes.txt", b"plain text", content_type="text/plain")
+        response = self.client.post(
+            f"/api/courses/{self.course.id}/cover/",
+            {"cover": text_file},
+            format="multipart",
+        )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(response["Content-Type"], "application/problem+json")
+        self.assertEqual(response.data["title"], "Invalid cover image")
+        self.course.refresh_from_db()
+        self.assertIsNone(self.course.cover_image_path)
+
+    def test_upload_cover_non_existent_course_returns_404(self):
+        file_content = b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR"
+        image = SimpleUploadedFile("cover.png", file_content, content_type="image/png")
+        response = self.client.post(
+            "/api/courses/99999/cover/",
+            {"cover": image},
+            format="multipart",
+        )
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+        self.assertEqual(response["Content-Type"], "application/problem+json")
+
+    def test_delete_cover_success(self):
+        file_content = b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR"
+        image = SimpleUploadedFile("cover.png", file_content, content_type="image/png")
+        self.client.post(
+            f"/api/courses/{self.course.id}/cover/",
+            {"cover": image},
+            format="multipart",
+        )
+        self.course.refresh_from_db()
+        old_path = LocalCoverImageStorage.get_path(self.course.cover_image_path)
+        self.assertTrue(os.path.exists(old_path))
+
+        del_response = self.client.delete(f"/api/courses/{self.course.id}/cover/")
+        self.assertEqual(del_response.status_code, status.HTTP_204_NO_CONTENT)
+        self.course.refresh_from_db()
+        self.assertIsNone(self.course.cover_image_path)
+        self.assertFalse(os.path.exists(old_path))
+
+        get_response = self.client.get(f"/api/courses/{self.course.id}/cover/")
+        self.assertEqual(get_response.status_code, status.HTTP_404_NOT_FOUND)
+
+    def test_replace_cover_deletes_previous_file(self):
+        image1 = SimpleUploadedFile("cover1.png", b"\x89PNG\r\n\x1a\n1", content_type="image/png")
+        self.client.post(f"/api/courses/{self.course.id}/cover/", {"cover": image1}, format="multipart")
+        self.course.refresh_from_db()
+        first_path = LocalCoverImageStorage.get_path(self.course.cover_image_path)
+        self.assertTrue(os.path.exists(first_path))
+
+        image2 = SimpleUploadedFile("cover2.jpg", b"\xff\xd8\xff2", content_type="image/jpeg")
+        self.client.post(f"/api/courses/{self.course.id}/cover/", {"cover": image2}, format="multipart")
+        self.course.refresh_from_db()
+        second_path = LocalCoverImageStorage.get_path(self.course.cover_image_path)
+        self.assertTrue(os.path.exists(second_path))
+        self.assertFalse(os.path.exists(first_path))

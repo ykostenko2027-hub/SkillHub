@@ -15,6 +15,10 @@ class ValidationException(Exception):
     pass
 
 
+class InvalidFileUploadException(Exception):
+    pass
+
+
 def rfc7807_exception_handler(exc, context):
     request = context.get("request")
     path = request.path if request else ""
@@ -30,6 +34,10 @@ def rfc7807_exception_handler(exc, context):
     elif isinstance(exc, ValidationException):
         status_code = 422
         title = "Business rule violation"
+        detail = str(exc)
+    elif isinstance(exc, InvalidFileUploadException):
+        status_code = 400
+        title = "Invalid cover image"
         detail = str(exc)
     else:
         response = exception_handler(exc, context)

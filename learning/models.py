@@ -16,6 +16,7 @@ class Course(models.Model):
     description = models.TextField(blank=True, default="")
     category = models.ForeignKey(Category, on_delete=models.CASCADE, related_name="courses")
     price = models.DecimalField(max_digits=10, decimal_places=2, default=0.00)
+    cover_image_path = models.CharField(max_length=255, null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True, db_index=True)
 
     class Meta:

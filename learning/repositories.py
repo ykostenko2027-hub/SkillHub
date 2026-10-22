@@ -20,6 +20,16 @@ class CourseRepository:
             .first()
         )
 
+    @staticmethod
+    def update_cover(course, file_name):
+        course.cover_image_path = file_name
+        course.save(update_fields=["cover_image_path"])
+        return course
+
+    @staticmethod
+    def delete(course):
+        course.delete()
+
 
 class EnrollmentRepository:
     @staticmethod

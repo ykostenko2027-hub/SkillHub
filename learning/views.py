@@ -1,4 +1,5 @@
 from django.db import connection, reset_queries
+from django.http import FileResponse
 from django_filters.rest_framework import DjangoFilterBackend
 from drf_spectacular.utils import extend_schema
 from rest_framework import filters, status, viewsets
@@ -9,6 +10,7 @@ from .models import Category, Course, Enrollment
 from .pagination import CoursePagination
 from .serializers import (
     CategorySerializer,
+    CourseCoverUploadSerializer,
     CourseDetailSerializer,
     CourseListSerializer,
     CreateEnrollmentSerializer,
@@ -47,6 +49,9 @@ class CourseViewSet(viewsets.ModelViewSet):
             return CourseListSerializer
         return CourseDetailSerializer
 
+    def perform_destroy(self, instance):
+        CourseService.delete_course(instance)
+
     @extend_schema(
         methods=["POST"],
         request=CreateEnrollmentSerializer,
@@ -70,6 +75,31 @@ class CourseViewSet(viewsets.ModelViewSet):
 
         enrollments = EnrollmentService.get_course_enrollments(pk)
         return Response(EnrollmentSerializer(enrollments, many=True).data)
+
+    @extend_schema(
+        methods=["POST"],
+        request=CourseCoverUploadSerializer,
+        responses={200: CourseDetailSerializer, 400: None, 404: None},
+    )
+    @extend_schema(
+        methods=["GET"],
+        responses={200: None, 404: None},
+    )
+    @extend_schema(
+        methods=["DELETE"],
+        responses={204: None, 404: None},
+    )
+    @action(detail=True, methods=["get", "post", "delete"], url_path="cover")
+    def cover(self, request, pk=None):
+        if request.method == "POST":
+            cover_file = request.FILES.get("cover")
+            course = CourseService.upload_cover(pk, cover_file)
+            return Response(CourseDetailSerializer(course).data, status=status.HTTP_200_OK)
+        if request.method == "DELETE":
+            CourseService.delete_cover(pk)
+            return Response(status=status.HTTP_204_NO_CONTENT)
+        path, content_type = CourseService.get_cover(pk)
+        return FileResponse(open(path, "rb"), content_type=content_type)
 
     @extend_schema(responses={200: None})
     @action(detail=False, methods=["get"], url_path="n1-demo")
