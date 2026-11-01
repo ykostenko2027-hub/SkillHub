@@ -1,3 +1,4 @@
+import uuid
 from django.db import connection, reset_queries
 from django.http import FileResponse
 from django_filters.rest_framework import DjangoFilterBackend
@@ -6,6 +7,8 @@ from rest_framework import filters, status, viewsets
 from rest_framework.decorators import action, api_view
 from rest_framework.response import Response
 
+from .background_jobs import job_status_store
+from .exceptions import NotFoundException
 from .models import Category, Course, Enrollment
 from .pagination import CoursePagination
 from .serializers import (
@@ -14,7 +17,9 @@ from .serializers import (
     CourseDetailSerializer,
     CourseListSerializer,
     CreateEnrollmentSerializer,
+    CreateRegistrationResponseSerializer,
     EnrollmentSerializer,
+    JobStatusSerializer,
 )
 from .services import CourseService, EnrollmentService
 
@@ -55,7 +60,7 @@ class CourseViewSet(viewsets.ModelViewSet):
     @extend_schema(
         methods=["POST"],
         request=CreateEnrollmentSerializer,
-        responses={201: EnrollmentSerializer, 400: None, 404: None, 409: None, 422: None},
+        responses={201: CreateRegistrationResponseSerializer, 400: None, 404: None, 409: None, 422: None},
     )
     @extend_schema(
         methods=["GET"],
@@ -66,12 +71,18 @@ class CourseViewSet(viewsets.ModelViewSet):
         if request.method == "POST":
             serializer = CreateEnrollmentSerializer(data=request.data)
             serializer.is_valid(raise_exception=True)
-            enrollment = EnrollmentService.register_student(
+            enrollment, job_id = EnrollmentService.register_student(
                 course_id=pk,
                 student_name=serializer.validated_data["student_name"],
                 student_email=serializer.validated_data["student_email"],
             )
-            return Response(EnrollmentSerializer(enrollment).data, status=status.HTTP_201_CREATED)
+            return Response(
+                {
+                    "registration": EnrollmentSerializer(enrollment).data,
+                    "jobId": str(job_id),
+                },
+                status=status.HTTP_201_CREATED,
+            )
 
         enrollments = EnrollmentService.get_course_enrollments(pk)
         return Response(EnrollmentSerializer(enrollments, many=True).data)
@@ -124,3 +135,21 @@ class CourseViewSet(viewsets.ModelViewSet):
             })
         finally:
             connection.force_debug_cursor = old_debug
+
+
+@extend_schema(responses={200: JobStatusSerializer, 404: None})
+@api_view(["GET"])
+def job_status(request, job_id):
+    try:
+        parsed_id = uuid.UUID(str(job_id))
+    except (ValueError, AttributeError):
+        raise NotFoundException(f"Background job with id '{job_id}' does not exist.")
+
+    current_status = job_status_store.get_status(parsed_id)
+    if current_status is None:
+        raise NotFoundException(f"Background job with id '{job_id}' does not exist.")
+
+    return Response({
+        "jobId": str(parsed_id),
+        "status": current_status.lower(),
+    })

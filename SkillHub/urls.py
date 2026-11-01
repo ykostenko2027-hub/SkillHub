@@ -1,12 +1,13 @@
 from django.conf import settings
 from django.contrib import admin
-from django.urls import include, path
+from django.urls import include, path, re_path
 from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView
-from learning.views import health_check
+from learning.views import health_check, job_status
 
 urlpatterns = [
     path("admin/", admin.site.urls),
     path("health/", health_check, name="health-check"),
+    re_path(r"^jobs/(?P<job_id>[^/]+)/?$", job_status, name="root-job-status"),
     path("api/", include("learning.urls")),
     path("api/schema/", SpectacularAPIView.as_view(), name="schema"),
 ]

@@ -1,3 +1,9 @@
+from .background_jobs import (
+    BackgroundJobStatus,
+    background_task_queue,
+    confirmation_sender,
+    job_status_store,
+)
 from .exceptions import ConflictException, NotFoundException, ValidationException
 from .repositories import CourseRepository, EnrollmentRepository
 from .storage import LocalCoverImageStorage
@@ -68,4 +74,30 @@ class EnrollmentService:
             raise ConflictException("This attendee is already registered for the course.")
         if EnrollmentRepository.count(course_id) >= 10:
             raise ValidationException("The course is at full capacity.")
-        return EnrollmentRepository.create(course, student_name, email)
+        enrollment = EnrollmentRepository.create(course, student_name, email)
+        job_id = job_status_store.create_job()
+        status_store = job_status_store
+        sender = confirmation_sender
+        background_task_queue.enqueue(
+            lambda stopping_event: EnrollmentService.process_confirmation_job(
+                job_id,
+                email,
+                status_store,
+                sender,
+                stopping_event,
+            )
+        )
+        return enrollment, job_id
+
+    @staticmethod
+    def process_confirmation_job(job_id, attendee_email, status_store, sender, stopping_event):
+        status_store.set_status(job_id, BackgroundJobStatus.PROCESSING)
+        try:
+            if stopping_event and stopping_event.is_set():
+                status_store.set_status(job_id, BackgroundJobStatus.CANCELLED)
+                return
+            sender.send(attendee_email)
+            status_store.set_status(job_id, BackgroundJobStatus.DONE)
+        except Exception:
+            status_store.set_status(job_id, BackgroundJobStatus.FAILED)
+            raise

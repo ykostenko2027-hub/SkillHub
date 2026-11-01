@@ -20,6 +20,16 @@ class CreateEnrollmentSerializer(serializers.Serializer):
     student_email = serializers.EmailField(max_length=320)
 
 
+class CreateRegistrationResponseSerializer(serializers.Serializer):
+    registration = EnrollmentSerializer()
+    jobId = serializers.UUIDField()
+
+
+class JobStatusSerializer(serializers.Serializer):
+    jobId = serializers.UUIDField()
+    status = serializers.CharField()
+
+
 class CourseCoverUploadSerializer(serializers.Serializer):
     cover = serializers.FileField()
 

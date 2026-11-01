@@ -1,4 +1,6 @@
 import os
+import time
+import uuid
 from django.conf import settings
 from django.core.exceptions import ImproperlyConfigured
 from django.core.files.uploadedfile import SimpleUploadedFile
@@ -6,6 +8,13 @@ from django.test import TestCase
 from rest_framework import status
 from rest_framework.test import APIClient
 from SkillHub.config import AppOptions
+from .background_jobs import (
+    BackgroundJobStatus,
+    BackgroundTaskQueue,
+    InMemoryJobStatusStore,
+    confirmation_sender,
+    job_status_store,
+)
 from .models import Category, Course, Enrollment
 from .storage import LocalCoverImageStorage
 
@@ -246,3 +255,115 @@ class ErrorHandlingAndApiTests(TestCase):
         second_path = LocalCoverImageStorage.get_path(self.course.cover_image_path)
         self.assertTrue(os.path.exists(second_path))
         self.assertFalse(os.path.exists(first_path))
+
+
+class BackgroundJobsTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.category = Category.objects.create(name="DevOps")
+        self.course = Course.objects.create(
+            title="Kubernetes",
+            category=self.category,
+            price=200.0,
+        )
+        self.orig_delay = confirmation_sender.delay
+        confirmation_sender.delay = 0
+
+    def tearDown(self):
+        confirmation_sender.delay = self.orig_delay
+        job_status_store.clear()
+
+    def test_task_queue_enqueue_dequeue(self):
+        queue_instance = BackgroundTaskQueue()
+        work_item = lambda token: None
+        queue_instance.enqueue(work_item)
+        dequeued = queue_instance.dequeue()
+        self.assertIs(dequeued, work_item)
+
+    def test_job_status_store_lifecycle(self):
+        store = InMemoryJobStatusStore()
+        job_id = store.create_job()
+        self.assertEqual(store.get_status(job_id), BackgroundJobStatus.PENDING)
+        store.set_status(job_id, BackgroundJobStatus.DONE)
+        self.assertEqual(store.get_status(job_id), BackgroundJobStatus.DONE)
+        random_id = uuid.uuid4()
+        self.assertIsNone(store.get_status(random_id))
+
+    def test_create_enrollment_enqueues_background_task_and_finishes_done(self):
+        response = self.client.post(
+            f"/api/courses/{self.course.id}/enrollments/",
+            {"student_name": "Oksana", "student_email": "oksana@example.com"},
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertIn("jobId", response.data)
+        self.assertIn("registration", response.data)
+        self.assertEqual(response.data["registration"]["student_name"], "Oksana")
+        job_id = response.data["jobId"]
+
+        final_status = None
+        for _ in range(20):
+            status_response = self.client.get(f"/jobs/{job_id}/")
+            self.assertEqual(status_response.status_code, status.HTTP_200_OK)
+            final_status = status_response.data["status"]
+            if final_status == BackgroundJobStatus.DONE:
+                break
+            time.sleep(0.05)
+
+        self.assertEqual(final_status, BackgroundJobStatus.DONE)
+
+    def test_unknown_job_id_returns_404_problem_details(self):
+        non_existent_id = "00000000-0000-0000-0000-000000000001"
+        response = self.client.get(f"/jobs/{non_existent_id}/")
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+        self.assertEqual(response["Content-Type"], "application/problem+json")
+        self.assertEqual(response.data["status"], 404)
+        self.assertEqual(response.data["title"], "Resource not found")
+        self.assertIn(non_existent_id, response.data["detail"])
+
+    def test_failed_job_and_worker_resilience(self):
+        response_failed = self.client.post(
+            f"/api/courses/{self.course.id}/enrollments/",
+            {"student_name": "Failing Student", "student_email": "fail@example.com"},
+            format="json",
+        )
+        self.assertEqual(response_failed.status_code, status.HTTP_201_CREATED)
+        failed_job_id = response_failed.data["jobId"]
+
+        final_status_failed = None
+        for _ in range(20):
+            res = self.client.get(f"/jobs/{failed_job_id}/")
+            final_status_failed = res.data["status"]
+            if final_status_failed == BackgroundJobStatus.FAILED:
+                break
+            time.sleep(0.05)
+        self.assertEqual(final_status_failed, BackgroundJobStatus.FAILED)
+
+        response_ok = self.client.post(
+            f"/api/courses/{self.course.id}/enrollments/",
+            {"student_name": "Successful Student", "student_email": "success@example.com"},
+            format="json",
+        )
+        self.assertEqual(response_ok.status_code, status.HTTP_201_CREATED)
+        ok_job_id = response_ok.data["jobId"]
+
+        final_status_ok = None
+        for _ in range(20):
+            res = self.client.get(f"/jobs/{ok_job_id}/")
+            final_status_ok = res.data["status"]
+            if final_status_ok == BackgroundJobStatus.DONE:
+                break
+            time.sleep(0.05)
+        self.assertEqual(final_status_ok, BackgroundJobStatus.DONE)
+
+    def test_in_memory_job_lost_after_store_cleared(self):
+        response = self.client.post(
+            f"/api/courses/{self.course.id}/enrollments/",
+            {"student_name": "Memory Test", "student_email": "memory@example.com"},
+            format="json",
+        )
+        job_id = response.data["jobId"]
+        job_status_store.clear()
+        res = self.client.get(f"/jobs/{job_id}/")
+        self.assertEqual(res.status_code, status.HTTP_404_NOT_FOUND)
+        self.assertTrue(Enrollment.objects.filter(student_email="memory@example.com").exists())
