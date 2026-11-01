@@ -1,11 +1,54 @@
 import os
 from django.conf import settings
+from django.core.exceptions import ImproperlyConfigured
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase
 from rest_framework import status
 from rest_framework.test import APIClient
+from SkillHub.config import AppOptions
 from .models import Category, Course, Enrollment
 from .storage import LocalCoverImageStorage
+
+
+class ConfigurationTests(TestCase):
+    def test_environment_defaults(self):
+        self.assertEqual(AppOptions.MAX_FILE_SIZE_BY_ENV["development"], 10)
+        self.assertEqual(AppOptions.MAX_FILE_SIZE_BY_ENV["staging"], 7)
+        self.assertEqual(AppOptions.MAX_FILE_SIZE_BY_ENV["production"], 5)
+
+    def test_validation_fails_on_empty_secret_key(self):
+        original = AppOptions.SECRET_KEY
+        try:
+            AppOptions.SECRET_KEY = ""
+            with self.assertRaises(ImproperlyConfigured):
+                AppOptions.validate()
+        finally:
+            AppOptions.SECRET_KEY = original
+
+    def test_validation_fails_on_invalid_file_size(self):
+        original = AppOptions.MAX_FILE_SIZE_MB
+        try:
+            AppOptions.MAX_FILE_SIZE_MB = 0
+            with self.assertRaises(ImproperlyConfigured):
+                AppOptions.validate()
+
+            AppOptions.MAX_FILE_SIZE_MB = 101
+            with self.assertRaises(ImproperlyConfigured):
+                AppOptions.validate()
+        finally:
+            AppOptions.MAX_FILE_SIZE_MB = original
+
+    def test_validation_fails_on_demo_key_in_production(self):
+        orig_env = AppOptions.ENVIRONMENT
+        orig_key = AppOptions.SECRET_KEY
+        try:
+            AppOptions.ENVIRONMENT = "production"
+            AppOptions.SECRET_KEY = "insecure-demo-key"
+            with self.assertRaises(ImproperlyConfigured):
+                AppOptions.validate()
+        finally:
+            AppOptions.ENVIRONMENT = orig_env
+            AppOptions.SECRET_KEY = orig_key
 
 
 class ErrorHandlingAndApiTests(TestCase):

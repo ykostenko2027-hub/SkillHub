@@ -9,7 +9,6 @@ class LocalCoverImageStorage:
         "image/jpeg": [".jpg", ".jpeg"],
         "image/png": [".png"],
     }
-    MAX_FILE_SIZE = 5 * 1024 * 1024
 
     @classmethod
     def get_upload_dir(cls):
@@ -18,11 +17,17 @@ class LocalCoverImageStorage:
         return str(upload_dir)
 
     @classmethod
+    def get_max_size_bytes(cls):
+        mb = getattr(settings, "FILE_STORAGE_MAX_SIZE_MB", 5)
+        return mb * 1024 * 1024
+
+    @classmethod
     def validate_file(cls, file):
         if not file or getattr(file, "size", 0) == 0:
             raise InvalidFileUploadException("Select a non-empty JPEG or PNG file.")
-        if file.size > cls.MAX_FILE_SIZE:
-            raise InvalidFileUploadException("The cover image must not exceed 5 MB.")
+        if file.size > cls.get_max_size_bytes():
+            mb = getattr(settings, "FILE_STORAGE_MAX_SIZE_MB", 5)
+            raise InvalidFileUploadException(f"The cover image must not exceed {mb} MB.")
         content_type = getattr(file, "content_type", "")
         if content_type not in cls.ALLOWED_TYPES:
             raise InvalidFileUploadException("Only JPEG and PNG cover images are supported.")

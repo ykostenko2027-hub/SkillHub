@@ -1,3 +1,4 @@
+from django.conf import settings
 from django.contrib import admin
 from django.urls import include, path
 from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView
@@ -8,6 +9,10 @@ urlpatterns = [
     path("health/", health_check, name="health-check"),
     path("api/", include("learning.urls")),
     path("api/schema/", SpectacularAPIView.as_view(), name="schema"),
-    path("swagger/v1/swagger.json", SpectacularAPIView.as_view(), name="swagger-json"),
-    path("swagger/", SpectacularSwaggerView.as_view(url_name="schema"), name="swagger-ui"),
 ]
+
+if settings.DEBUG or getattr(settings, "ENVIRONMENT", "development") != "production":
+    urlpatterns += [
+        path("swagger/v1/swagger.json", SpectacularAPIView.as_view(), name="swagger-json"),
+        path("swagger/", SpectacularSwaggerView.as_view(url_name="schema"), name="swagger-ui"),
+    ]

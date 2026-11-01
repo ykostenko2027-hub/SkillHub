@@ -1,14 +1,18 @@
-import os
 from pathlib import Path
 from dotenv import load_dotenv
+from .config import AppOptions
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 load_dotenv(BASE_DIR / ".env")
 
-SECRET_KEY = os.getenv("SECRET_KEY", "django-stage-1-secret-key")
-DEBUG = os.getenv("DEBUG", "True").lower() in ("true", "1")
+AppOptions.validate()
 
-ALLOWED_HOSTS = []
+ENVIRONMENT = AppOptions.ENVIRONMENT
+SECRET_KEY = AppOptions.SECRET_KEY
+DEBUG = AppOptions.DEBUG
+FILE_STORAGE_MAX_SIZE_MB = AppOptions.MAX_FILE_SIZE_MB
+
+ALLOWED_HOSTS = ["*"]
 
 INSTALLED_APPS = [
     'django.contrib.admin',
@@ -67,9 +71,9 @@ REST_FRAMEWORK = {
 }
 
 SPECTACULAR_SETTINGS = {
-    "TITLE": "SkillHub API",
-    "DESCRIPTION": "Платформа онлайн-навчання",
-    "VERSION": "v1",
+    "TITLE": AppOptions.OPENAPI_TITLE,
+    "DESCRIPTION": AppOptions.OPENAPI_DESCRIPTION,
+    "VERSION": AppOptions.OPENAPI_VERSION,
     "SERVE_INCLUDE_SCHEMA": False,
 }
 
