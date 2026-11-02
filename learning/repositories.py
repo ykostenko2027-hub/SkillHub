@@ -1,5 +1,7 @@
+from django.db import IntegrityError, transaction
 from django.db.models import Count
-from .models import Course, Enrollment
+from .exceptions import ConflictException
+from .models import AppUser, Course, Enrollment, UserRoleAssignment
 
 
 class CourseRepository:
@@ -54,3 +56,29 @@ class EnrollmentRepository:
             student_name=student_name.strip(),
             student_email=student_email.strip(),
         )
+
+
+class UserRepository:
+    @staticmethod
+    def get_by_email(email):
+        return (
+            AppUser.objects.prefetch_related("roles")
+            .filter(email=email)
+            .first()
+        )
+
+    @staticmethod
+    def create_user(email, first_name, last_name, display_name, password_hash, role):
+        try:
+            with transaction.atomic():
+                user = AppUser.objects.create(
+                    email=email,
+                    first_name=first_name,
+                    last_name=last_name,
+                    display_name=display_name,
+                    password_hash=password_hash,
+                )
+                UserRoleAssignment.objects.create(user=user, role=role)
+                return user
+        except IntegrityError:
+            raise ConflictException("An account with this email already exists.")

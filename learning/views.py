@@ -20,8 +20,11 @@ from .serializers import (
     CreateRegistrationResponseSerializer,
     EnrollmentSerializer,
     JobStatusSerializer,
+    LoginSerializer,
+    RegisterSerializer,
+    UserDtoSerializer,
 )
-from .services import CourseService, EnrollmentService
+from .services import AuthService, CourseService, EnrollmentService
 
 
 @extend_schema(responses={200: None})
@@ -153,3 +156,36 @@ def job_status(request, job_id):
         "jobId": str(parsed_id),
         "status": current_status.lower(),
     })
+
+
+@extend_schema(
+    request=RegisterSerializer,
+    responses={201: UserDtoSerializer, 400: None, 409: None},
+)
+@api_view(["POST"])
+def auth_register(request):
+    serializer = RegisterSerializer(data=request.data)
+    serializer.is_valid(raise_exception=True)
+    user_dto = AuthService.register(
+        email=serializer.validated_data["email"],
+        password=serializer.validated_data["password"],
+        first_name=serializer.validated_data["first_name"],
+        last_name=serializer.validated_data["last_name"],
+        display_name=serializer.validated_data["display_name"],
+    )
+    return Response(user_dto, status=status.HTTP_201_CREATED)
+
+
+@extend_schema(
+    request=LoginSerializer,
+    responses={200: UserDtoSerializer, 400: None, 401: None},
+)
+@api_view(["POST"])
+def auth_login(request):
+    serializer = LoginSerializer(data=request.data)
+    serializer.is_valid(raise_exception=True)
+    user_dto = AuthService.login(
+        email=serializer.validated_data["email"],
+        password=serializer.validated_data["password"],
+    )
+    return Response(user_dto, status=status.HTTP_200_OK)

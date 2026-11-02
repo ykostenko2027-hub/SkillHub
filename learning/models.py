@@ -1,3 +1,4 @@
+import uuid
 from django.db import models
 
 
@@ -21,6 +22,9 @@ class Course(models.Model):
 
     class Meta:
         ordering = ["created_at", "id"]
+        indexes = [
+            models.Index(fields=["created_at", "id"], name="ix_course_created_at_id"),
+        ]
 
     def __str__(self):
         return self.title
@@ -44,3 +48,45 @@ class Enrollment(models.Model):
 
     def __str__(self):
         return f"{self.student_name} -> {self.course.title}"
+
+
+class UserRole:
+    ATTENDEE = "Attendee"
+    ORGANIZER = "Organizer"
+    ADMIN = "Admin"
+
+    CHOICES = [
+        (ATTENDEE, ATTENDEE),
+        (ORGANIZER, ORGANIZER),
+        (ADMIN, ADMIN),
+    ]
+
+
+class AppUser(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    email = models.EmailField(max_length=320, unique=True)
+    first_name = models.CharField(max_length=100)
+    last_name = models.CharField(max_length=100)
+    display_name = models.CharField(max_length=80, null=True, blank=True)
+    password_hash = models.CharField(max_length=255)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "Users"
+
+    def __str__(self):
+        return self.email
+
+
+class UserRoleAssignment(models.Model):
+    user = models.ForeignKey(AppUser, on_delete=models.CASCADE, related_name="roles")
+    role = models.CharField(max_length=20, choices=UserRole.CHOICES)
+
+    class Meta:
+        db_table = "UserRoles"
+        constraints = [
+            models.UniqueConstraint(fields=["user", "role"], name="pk_user_roles"),
+        ]
+
+    def __str__(self):
+        return f"{self.user.email}: {self.role}"

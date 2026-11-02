@@ -1,3 +1,4 @@
+import logging
 import os
 import time
 import uuid
@@ -15,7 +16,7 @@ from .background_jobs import (
     confirmation_sender,
     job_status_store,
 )
-from .models import Category, Course, Enrollment
+from .models import AppUser, Category, Course, Enrollment, UserRoleAssignment
 from .storage import LocalCoverImageStorage
 
 
@@ -268,8 +269,12 @@ class BackgroundJobsTests(TestCase):
         )
         self.orig_delay = confirmation_sender.delay
         confirmation_sender.delay = 0
+        self.bg_logger = logging.getLogger("learning.background_jobs")
+        self.orig_disabled = self.bg_logger.disabled
+        self.bg_logger.disabled = True
 
     def tearDown(self):
+        self.bg_logger.disabled = self.orig_disabled
         confirmation_sender.delay = self.orig_delay
         job_status_store.clear()
 
@@ -367,3 +372,172 @@ class BackgroundJobsTests(TestCase):
         res = self.client.get(f"/jobs/{job_id}/")
         self.assertEqual(res.status_code, status.HTTP_404_NOT_FOUND)
         self.assertTrue(Enrollment.objects.filter(student_email="memory@example.com").exists())
+
+
+class QueryOptimizationAndPaginationTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.category = Category.objects.create(name="Data")
+        self.course = Course.objects.create(title="SQL Tuning", category=self.category, price=150.0)
+
+    def test_course_composite_index_defined(self):
+        index_names = [idx.name for idx in Course._meta.indexes]
+        self.assertIn("ix_course_created_at_id", index_names)
+
+    def test_page_size_over_100_returns_400(self):
+        response = self.client.get("/api/courses/?page_size=101")
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(response["Content-Type"], "application/problem+json")
+        self.assertEqual(response.data["status"], 400)
+
+
+class AuthRegistrationAndLoginTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+
+    def test_register_success_normalizes_email_and_assigns_attendee_role(self):
+        response = self.client.post(
+            "/auth/register",
+            {
+                "email": "  Student14@Example.com  ",
+                "password": "Password1",
+                "firstName": "  Оксана ",
+                "lastName": " Коваль  ",
+            },
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(response.data["email"], "student14@example.com")
+        self.assertEqual(response.data["firstName"], "Оксана")
+        self.assertEqual(response.data["lastName"], "Коваль")
+        self.assertEqual(response.data["displayName"], "Оксана Коваль")
+        self.assertEqual(response.data["roles"], ["Attendee"])
+        self.assertNotIn("password", response.data)
+        self.assertNotIn("passwordHash", response.data)
+
+        user = AppUser.objects.get(email="student14@example.com")
+        self.assertTrue(user.password_hash.startswith("$2b$12$"))
+        self.assertNotEqual(user.password_hash, "Password1")
+        self.assertTrue(UserRoleAssignment.objects.filter(user=user, role="Attendee").exists())
+
+    def test_register_with_custom_display_name(self):
+        response = self.client.post(
+            "/auth/register",
+            {
+                "email": "custom@example.com",
+                "password": "Password1",
+                "firstName": "Оксана",
+                "lastName": "Коваль",
+                "displayName": "  Oksana K.  ",
+            },
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(response.data["displayName"], "Oksana K.")
+
+    def test_register_duplicate_email_returns_409(self):
+        payload = {
+            "email": "student14@example.com",
+            "password": "Password1",
+            "firstName": "Оксана",
+            "lastName": "Коваль",
+        }
+        self.client.post("/auth/register", payload, format="json")
+        response = self.client.post(
+            "/auth/register",
+            {**payload, "email": "STUDENT14@EXAMPLE.COM"},
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_409_CONFLICT)
+        self.assertEqual(response["Content-Type"], "application/problem+json")
+        self.assertEqual(response.data["status"], 409)
+        self.assertEqual(response.data["detail"], "An account with this email already exists.")
+
+    def test_login_success_and_invalid_credentials_return_401(self):
+        self.client.post(
+            "/auth/register",
+            {
+                "email": "student14@example.com",
+                "password": "Password1",
+                "firstName": "Оксана",
+                "lastName": "Коваль",
+            },
+            format="json",
+        )
+        ok_res = self.client.post(
+            "/auth/login",
+            {"email": "  STUDENT14@example.com ", "password": "Password1"},
+            format="json",
+        )
+        self.assertEqual(ok_res.status_code, status.HTTP_200_OK)
+        self.assertEqual(ok_res.data["email"], "student14@example.com")
+        self.assertEqual(ok_res.data["roles"], ["Attendee"])
+
+        wrong_pw = self.client.post(
+            "/auth/login",
+            {"email": "student14@example.com", "password": "Password2"},
+            format="json",
+        )
+        self.assertEqual(wrong_pw.status_code, status.HTTP_401_UNAUTHORIZED)
+        self.assertEqual(wrong_pw["Content-Type"], "application/problem+json")
+        self.assertEqual(wrong_pw.data["title"], "Invalid credentials")
+        self.assertEqual(wrong_pw.data["detail"], "Invalid email or password.")
+
+        unknown_user = self.client.post(
+            "/auth/login",
+            {"email": "nobody@example.com", "password": "Password1"},
+            format="json",
+        )
+        self.assertEqual(unknown_user.status_code, status.HTTP_401_UNAUTHORIZED)
+        self.assertEqual(unknown_user.data["title"], wrong_pw.data["title"])
+        self.assertEqual(unknown_user.data["detail"], wrong_pw.data["detail"])
+
+    def test_invalid_passwords_and_whitespace_names_return_400(self):
+        invalid_passwords = [
+            "Pass1",
+            "password1",
+            "PASSWORD1",
+            "PasswordOnly",
+            "Пароль123",
+            "Password 1",
+            "Password1!",
+        ]
+        for pwd in invalid_passwords:
+            res = self.client.post(
+                "/auth/register",
+                {
+                    "email": "test@example.com",
+                    "password": pwd,
+                    "firstName": "Оксана",
+                    "lastName": "Коваль",
+                },
+                format="json",
+            )
+            self.assertEqual(res.status_code, status.HTTP_400_BAD_REQUEST)
+
+        blank_name_res = self.client.post(
+            "/auth/register",
+            {
+                "email": "test@example.com",
+                "password": "Password1",
+                "firstName": "   ",
+                "lastName": "Коваль",
+            },
+            format="json",
+        )
+        self.assertEqual(blank_name_res.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_role_injection_in_register_is_ignored(self):
+        response = self.client.post(
+            "/auth/register",
+            {
+                "email": "hacker@example.com",
+                "password": "Password1",
+                "firstName": "Іван",
+                "lastName": "Петренко",
+                "roles": ["Admin"],
+            },
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(response.data["roles"], ["Attendee"])

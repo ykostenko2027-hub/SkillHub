@@ -1,12 +1,25 @@
+import bcrypt
 from .background_jobs import (
     BackgroundJobStatus,
     background_task_queue,
     confirmation_sender,
     job_status_store,
 )
-from .exceptions import ConflictException, NotFoundException, ValidationException
-from .repositories import CourseRepository, EnrollmentRepository
+from .exceptions import (
+    ConflictException,
+    InvalidCredentialsException,
+    NotFoundException,
+    ValidationException,
+)
+from .models import UserRole
+from .repositories import CourseRepository, EnrollmentRepository, UserRepository
 from .storage import LocalCoverImageStorage
+
+BCRYPT_WORK_FACTOR = 12
+DUMMY_PASSWORD_HASH = bcrypt.hashpw(
+    b"DummyPassword1",
+    bcrypt.gensalt(rounds=BCRYPT_WORK_FACTOR),
+)
 
 
 class CourseService:
@@ -101,3 +114,53 @@ class EnrollmentService:
         except Exception:
             status_store.set_status(job_id, BackgroundJobStatus.FAILED)
             raise
+
+
+class AuthService:
+    @staticmethod
+    def register(email, password, first_name, last_name, display_name=None):
+        normalized_email = email.strip().lower()
+        if UserRepository.get_by_email(normalized_email) is not None:
+            raise ConflictException("An account with this email already exists.")
+
+        password_hash = bcrypt.hashpw(
+            password.encode("utf-8"),
+            bcrypt.gensalt(rounds=BCRYPT_WORK_FACTOR),
+        ).decode("utf-8")
+
+        user = UserRepository.create_user(
+            email=normalized_email,
+            first_name=first_name,
+            last_name=last_name,
+            display_name=display_name,
+            password_hash=password_hash,
+            role=UserRole.ATTENDEE,
+        )
+        return AuthService.to_dto(user, roles=[UserRole.ATTENDEE])
+
+    @staticmethod
+    def login(email, password):
+        normalized_email = email.strip().lower()
+        user = UserRepository.get_by_email(normalized_email)
+        target_hash = user.password_hash.encode("utf-8") if user is not None else DUMMY_PASSWORD_HASH
+        password_matches = bcrypt.checkpw(password.encode("utf-8"), target_hash)
+
+        if user is None or not password_matches:
+            raise InvalidCredentialsException("Invalid email or password.")
+
+        roles = [r.role for r in user.roles.all()]
+        return AuthService.to_dto(user, roles=roles)
+
+    @staticmethod
+    def to_dto(user, roles=None):
+        if roles is None:
+            roles = [r.role for r in user.roles.all()]
+        display_name = user.display_name if user.display_name else f"{user.first_name} {user.last_name}"
+        return {
+            "id": str(user.id),
+            "email": user.email,
+            "firstName": user.first_name,
+            "lastName": user.last_name,
+            "displayName": display_name,
+            "roles": roles,
+        }

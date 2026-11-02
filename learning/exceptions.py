@@ -19,6 +19,10 @@ class InvalidFileUploadException(Exception):
     pass
 
 
+class InvalidCredentialsException(Exception):
+    pass
+
+
 def rfc7807_exception_handler(exc, context):
     request = context.get("request")
     path = request.path if request else ""
@@ -39,6 +43,10 @@ def rfc7807_exception_handler(exc, context):
         status_code = 400
         title = "Invalid cover image"
         detail = str(exc)
+    elif isinstance(exc, InvalidCredentialsException):
+        status_code = 401
+        title = "Invalid credentials"
+        detail = str(exc) or "Invalid email or password."
     else:
         response = exception_handler(exc, context)
         if response is not None:
