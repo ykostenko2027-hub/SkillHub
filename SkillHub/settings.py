@@ -68,6 +68,7 @@ REST_FRAMEWORK = {
     "PAGE_SIZE": 10,
     "EXCEPTION_HANDLER": "learning.exceptions.rfc7807_exception_handler",
     "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
+    'rest_framework_simplejwt.authentication.JWTAuthentication',
 }
 
 SPECTACULAR_SETTINGS = {
